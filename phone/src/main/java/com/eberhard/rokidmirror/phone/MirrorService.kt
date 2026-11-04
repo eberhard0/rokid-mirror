@@ -125,7 +125,11 @@ class MirrorService : Service() {
                 o.write(Protocol.MAGIC.toByteArray())
                 o.flush()
                 out = o
-                main.post { if (running) beginCapture(code, data) }
+                main.post {
+                    if (!running) return@post
+                    // Anything the capture or encoder refuses is shown on the phone, not a crash.
+                    try { beginCapture(code, data) } catch (e: Exception) { fail("Capture failed: ${e.javaClass.simpleName}: ${e.message}") }
+                }
             } catch (e: Exception) {
                 fail("Couldn't reach the glasses at $host: ${e.message}")
             }
@@ -168,7 +172,11 @@ class MirrorService : Service() {
             if (displayId != Display.DEFAULT_DISPLAY || !running) return
             val (w, h) = targetSize(screenBounds())
             if (w to h == size) return
-            main.postDelayed({ if (running && (w to h) != size) restartEncoder(w, h) }, 300)
+            main.postDelayed({
+                if (running && (w to h) != size) {
+                    try { restartEncoder(w, h) } catch (e: Exception) { fail("Re-fit failed: ${e.message}") }
+                }
+            }, 300)
         }
     }
 
@@ -196,7 +204,7 @@ class MirrorService : Service() {
             setInteger(MediaFormat.KEY_BIT_RATE, 2_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, 30)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
-            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            // Default (VBR) rate control: some encoders refuse CBR at configure time.
         }
         return MediaCodec.createEncoderByType("video/avc").apply {
             configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
