@@ -129,6 +129,7 @@ class MirrorService : Service() {
                 o.flush()
                 out = o
                 Log.add("connected, magic sent")
+                startSender()
                 main.post {
                     if (!running) return@post
                     // Anything the capture or encoder refuses is shown on the phone, not a crash.
@@ -241,20 +242,49 @@ class MirrorService : Service() {
         send(Protocol.KIND_HEADER, payload, 0)
     }
 
-    @Synchronized
+    private class Packet(val kind: Int, val payload: ByteArray, val pts: Long)
+
+    /**
+     * All writes happen on one sender thread: the header is sent from the main thread (where
+     * Android forbids network writes — that was the "went away: null" of 1.0.3) and frames from
+     * the encoder's drain thread. Frames are dropped when the link falls behind; header and
+     * config never are.
+     */
+    private val outbox = java.util.concurrent.LinkedBlockingQueue<Packet>()
+    private var sender: Thread? = null
+
+    private fun startSender() {
+        if (sender != null) return
+        val t = Thread({
+            while (running) {
+                val p = try { outbox.take() } catch (e: InterruptedException) { break }
+                val o = out ?: break
+                try {
+                    o.writeInt(p.kind)
+                    o.writeInt(p.payload.size)
+                    o.writeLong(p.pts)
+                    o.write(p.payload)
+                    o.flush()
+                } catch (e: Exception) {
+                    fail("The glasses went away: ${e.javaClass.simpleName} ${e.message ?: ""}".trim())
+                    break
+                }
+            }
+        }, "rokid-mirror-send").apply { isDaemon = true }
+        sender = t
+        t.start()
+    }
+
     private fun send(kind: Int, payload: ByteArray, pts: Long): Boolean {
-        val o = out ?: return false
-        return try {
-            o.writeInt(kind)
-            o.writeInt(payload.size)
-            o.writeLong(pts)
-            o.write(payload)
-            o.flush()
-            true
-        } catch (e: Exception) {
-            fail("The glasses went away: ${e.message}")
-            false
+        if (!running) return false
+        if (kind == Protocol.KIND_FRAME && outbox.size > 30) {
+            // Behind by a second: throw away queued frames, keep header/config, then this frame.
+            val keep = outbox.filter { it.kind != Protocol.KIND_FRAME }
+            outbox.clear()
+            outbox.addAll(keep)
         }
+        outbox.offer(Packet(kind, payload, pts))
+        return true
     }
 
     private fun startDrain(enc: MediaCodec) {
@@ -308,6 +338,9 @@ class MirrorService : Service() {
         inputSurface = null
         runCatching { projection?.stop() }
         projection = null
+        sender?.interrupt()
+        sender = null
+        outbox.clear()
         runCatching { out?.close() }
         runCatching { socket?.close() }
         out = null
