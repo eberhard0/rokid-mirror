@@ -20,8 +20,45 @@ class Discovery(context: Context) {
     private val _found = MutableStateFlow<List<Found>>(emptyList())
     val found: StateFlow<List<Found>> = _found.asStateFlow()
 
+    private var probe: Thread? = null
+
+    /**
+     * mDNS doesn't always cross a phone's hotspot, so the glasses also answer a UDP broadcast:
+     * "RMDISC?" to port 7071, reply "RMDISC <port>" from their address.
+     */
+    private fun startProbe() {
+        val t = Thread({
+            try {
+                java.net.DatagramSocket().use { socket ->
+                    socket.broadcast = true
+                    socket.soTimeout = 1000
+                    val ask = "RMDISC?".toByteArray()
+                    val buf = ByteArray(64)
+                    while (!Thread.currentThread().isInterrupted) {
+                        runCatching {
+                            socket.send(java.net.DatagramPacket(ask, ask.size, java.net.InetAddress.getByName("255.255.255.255"), Protocol.PROBE_PORT))
+                        }
+                        val until = System.currentTimeMillis() + 2000
+                        while (System.currentTimeMillis() < until) {
+                            val packet = java.net.DatagramPacket(buf, buf.size)
+                            try { socket.receive(packet) } catch (e: java.net.SocketTimeoutException) { continue }
+                            val text = String(packet.data, 0, packet.length)
+                            if (!text.startsWith("RMDISC ")) continue
+                            val host = packet.address.hostAddress ?: continue
+                            val port = text.removePrefix("RMDISC ").trim().toIntOrNull() ?: Protocol.PORT
+                            _found.value = _found.value.filterNot { it.host == host } + Found("Rokid Screen", host, port)
+                        }
+                    }
+                }
+            } catch (e: Exception) { /* no network: nothing to find */ }
+        }, "rokid-mirror-probe").apply { isDaemon = true }
+        probe = t
+        t.start()
+    }
+
     fun start() {
         if (listener != null) return
+        startProbe()
         lock = wifi.createMulticastLock("rokid-mirror").apply { setReferenceCounted(false); acquire() }
         val l = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {}
@@ -53,6 +90,8 @@ class Discovery(context: Context) {
     }
 
     fun stop() {
+        probe?.interrupt()
+        probe = null
         listener?.let { runCatching { nsd.stopServiceDiscovery(it) } }
         listener = null
         runCatching { lock?.release() }

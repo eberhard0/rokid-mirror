@@ -77,7 +77,8 @@ class MainActivity : Activity() {
     private fun showWaiting(detail: String? = null) = main.post {
         status.visibility = View.VISIBLE
         line1.text = "Waiting for the phone…"
-        line2.text = detail ?: "Open Rokid Mirror on the phone.\nGlasses IP: ${localIp() ?: "not on Wi-Fi"}  port ${Protocol.PORT}"
+        line2.text = detail ?: "Open Rokid Mirror on the phone.\n" + (localIps().takeIf { it.isNotEmpty() }
+            ?.joinToString("\n") { (name, ip) -> "$name: $ip" } ?: "Not on Wi-Fi: join the phone's hotspot in Hi Rokid.")
     }
 
     private fun showConnected(from: String) = main.post {
@@ -88,8 +89,29 @@ class MainActivity : Activity() {
 
     private fun hideStatus() = main.post { status.visibility = View.GONE }
 
+    private var probe: java.net.DatagramSocket? = null
+
+    /** Answers the phone's UDP broadcast so it finds us even where mDNS doesn't cross the hotspot. */
+    private fun startProbeAnswering() {
+        if (probe != null) return
+        val socket = runCatching { java.net.DatagramSocket(Protocol.PROBE_PORT).apply { broadcast = true } }.getOrNull() ?: return
+        probe = socket
+        Thread({
+            val buf = ByteArray(64)
+            while (!socket.isClosed) {
+                val packet = java.net.DatagramPacket(buf, buf.size)
+                try { socket.receive(packet) } catch (e: Exception) { break }
+                if (String(packet.data, 0, packet.length).startsWith("RMDISC?")) {
+                    val reply = "RMDISC ${Protocol.PORT}".toByteArray()
+                    runCatching { socket.send(java.net.DatagramPacket(reply, reply.size, packet.address, packet.port)) }
+                }
+            }
+        }, "rokid-screen-probe").apply { isDaemon = true; start() }
+    }
+
     private fun startServer() {
         if (server != null) return
+        startProbeAnswering()
         val s = ServerSocket(Protocol.PORT).apply { reuseAddress = true }
         server = s
         serverThread = Thread({
@@ -109,6 +131,8 @@ class MainActivity : Activity() {
     }
 
     private fun stopServer() {
+        runCatching { probe?.close() }
+        probe = null
         runCatching { client?.close() }
         runCatching { server?.close() }
         client = null
@@ -187,13 +211,14 @@ class MainActivity : Activity() {
         multicastLock = null
     }
 
-    private fun localIp(): String? = runCatching {
+    /** Every IPv4 address with its interface, Wi-Fi (wlan*) first: that's the one the phone needs. */
+    private fun localIps(): List<Pair<String, String>> = runCatching {
         NetworkInterface.getNetworkInterfaces().toList()
             .filter { it.isUp && !it.isLoopback }
-            .flatMap { it.inetAddresses.toList() }
-            .firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress }
-            ?.hostAddress
-    }.getOrNull()
+            .flatMap { ni -> ni.inetAddresses.toList().filter { it is java.net.Inet4Address }.map { ni.name to it.hostAddress.orEmpty() } }
+            .sortedBy { (name, _) -> if (name.startsWith("wlan")) 0 else 1 }
+            .map { (name, ip) -> (if (name.startsWith("wlan")) "Wi-Fi" else name) to ip }
+    }.getOrDefault(emptyList())
 
     /** An asynchronous H.264 decoder drawing straight to the surface, frames released as they come. */
     private class Decoder(w: Int, h: Int, surface: android.view.Surface, private val onFirstFrame: () -> Unit) {

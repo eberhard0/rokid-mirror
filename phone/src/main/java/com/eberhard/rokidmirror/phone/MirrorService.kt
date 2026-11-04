@@ -73,7 +73,8 @@ class MirrorService : Service() {
                 val code = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 @Suppress("DEPRECATION")
                 val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
-                host = intent.getStringExtra(EXTRA_HOST).orEmpty()
+                // People type what the glasses show, sometimes with ":7070" on the end: take just the address.
+                host = intent.getStringExtra(EXTRA_HOST).orEmpty().trim().substringBefore(':').substringBefore('/')
                 if (data == null || host.isEmpty()) {
                     stopSelf()
                     return START_NOT_STICKY
