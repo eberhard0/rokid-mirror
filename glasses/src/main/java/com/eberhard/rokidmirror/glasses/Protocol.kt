@@ -30,4 +30,6 @@ object Protocol {
     const val SILENCE_TIMEOUT_MS = 6000
     /** DeX mode: the phone relays scrcpy's video socket here (see ~/bin/rokid-dex.sh). */
     const val DEX_PORT = 27184
+    /** UDP: the glasses broadcast "RMDEX?" here; the phone running rokid-dex.sh answers "RMDEX <port>". */
+    const val DEX_DISCOVERY_PORT = 7072
 }

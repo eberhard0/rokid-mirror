@@ -88,9 +88,10 @@ class MainActivity : Activity() {
             while (!Thread.currentThread().isInterrupted) {
                 try { Thread.sleep(3000) } catch (e: InterruptedException) { break }
                 if (client != null && !client!!.isClosed) continue // mirroring is on
-                val gateway = gatewayIp() ?: continue
+                // Ask the network who runs the DeX screen; fall back to the hotspot gateway (the phone).
+                val (host, port) = findDex() ?: (gatewayIp()?.let { it to Protocol.DEX_PORT } ?: continue)
                 val socket = try {
-                    Socket().apply { connect(java.net.InetSocketAddress(gateway, Protocol.DEX_PORT), 1500) }
+                    Socket().apply { connect(java.net.InetSocketAddress(host, port), 1500) }
                 } catch (e: Exception) { continue }
                 dexActive = true
                 main.post { line1.text = "DeX"; line2.text = "Connected to the phone's DeX screen, waiting for the picture…" }
@@ -150,6 +151,23 @@ class MainActivity : Activity() {
             else decoder?.feed(payload, pts, 0)
         }
     }
+
+    /** Broadcasts "RMDEX?" and waits a second for "RMDEX <port>" from the phone running rokid-dex.sh. */
+    private fun findDex(): Pair<String, Int>? = runCatching {
+        java.net.DatagramSocket().use { socket ->
+            socket.broadcast = true
+            socket.soTimeout = 1000
+            val ask = "RMDEX?".toByteArray()
+            socket.send(java.net.DatagramPacket(ask, ask.size, InetAddress.getByName("255.255.255.255"), Protocol.DEX_DISCOVERY_PORT))
+            val buf = ByteArray(64)
+            val packet = java.net.DatagramPacket(buf, buf.size)
+            socket.receive(packet)
+            val text = String(packet.data, 0, packet.length).trim()
+            if (!text.startsWith("RMDEX ")) return null
+            val host = packet.address.hostAddress ?: return null
+            host to (text.removePrefix("RMDEX ").trim().toIntOrNull() ?: Protocol.DEX_PORT)
+        }
+    }.getOrNull()
 
     /** The phone, when the glasses are on its hotspot: the default route's gateway. */
     private fun gatewayIp(): String? = runCatching {

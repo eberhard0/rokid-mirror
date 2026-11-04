@@ -15,6 +15,7 @@ JAR=$DIR/scrcpy-server-v5.0.1
 VER=5.0.1
 LOCAL=27183          # adb forward on the phone's loopback
 RELAY=27184          # what the glasses connect to, on the hotspot address
+DISC=7072            # UDP: glasses ask "RMDEX?", we answer "RMDEX 27184"
 LOG=$DIR/server.log
 PIDS=$DIR/pids
 
@@ -43,6 +44,9 @@ case "${1:-}" in
     echo "$!" > $PIDS
     socat TCP-LISTEN:$RELAY,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:$LOCAL >> $LOG 2>&1 &
     echo "$!" >> $PIDS
+    # Answers the glasses' "RMDEX?" broadcast so they find this phone on any shared Wi-Fi, not only the hotspot.
+    socat UDP-RECVFROM:$DISC,reuseaddr,fork SYSTEM:"echo RMDEX $RELAY" >> $LOG 2>&1 &
+    echo "$!" >> $PIDS
     sleep 2
     IP=$(ip -4 addr show 2>/dev/null | grep -oE "inet (192\.168|10\.)[0-9.]+" | grep -v "inet 127" | head -1 | cut -d' ' -f2)
     echo "DeX screen $SIZE is up. Glasses connect to ${IP:-<hotspot ip>}:$RELAY (Rokid Screen does this by itself)."
@@ -53,6 +57,7 @@ case "${1:-}" in
       kill $P 2>/dev/null
     fi
     pkill -f "TCP-LISTEN:$RELAY" 2>/dev/null
+    pkill -f "UDP-RECVFROM:$DISC" 2>/dev/null
     adb shell pkill -f com.genymobile.scrcpy.Server 2>/dev/null
     adb forward --remove tcp:$LOCAL 2>/dev/null
     echo "DeX screen stopped." ;;
