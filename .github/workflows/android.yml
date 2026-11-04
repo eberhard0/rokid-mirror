@@ -1,0 +1,64 @@
+name: Android
+
+# Every push to main / workflow_dispatch: build both signed release APKs (phone sender + glasses
+# receiver). Signing needs KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_PASSWORD, KEY_ALIAS
+# (set with ~/hindsight-keys/set-github-secrets.sh, REPO=eberhard0/rokid-mirror).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >
+            platforms;android-37.0
+            build-tools;37.0.0
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Decode keystore and write signing.properties
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          cat > signing.properties <<EOT
+          storeFile=$RUNNER_TEMP/upload.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOT
+      - name: Build release APKs
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rokid-mirror
+          retention-days: 7
+          path: |
+            phone/build/outputs/apk/release/*.apk
+            glasses/build/outputs/apk/release/*.apk
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            phone/build/outputs/apk/release/*.apk
+            glasses/build/outputs/apk/release/*.apk
