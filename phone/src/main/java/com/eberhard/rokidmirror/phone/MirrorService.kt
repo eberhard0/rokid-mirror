@@ -75,6 +75,8 @@ class MirrorService : Service() {
                 val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
                 // People type what the glasses show, sometimes with ":7070" on the end: take just the address.
                 host = intent.getStringExtra(EXTRA_HOST).orEmpty().trim().substringBefore(':').substringBefore('/')
+                Log.clear()
+                Log.add("start: host=$host resultCode=$code data=${data != null}")
                 if (data == null || host.isEmpty()) {
                     stopSelf()
                     return START_NOT_STICKY
@@ -116,6 +118,7 @@ class MirrorService : Service() {
         running = true
         Thread({
             try {
+                Log.add("connecting to $host:${Protocol.PORT}")
                 val s = Socket().apply {
                     tcpNoDelay = true
                     connect(InetSocketAddress(host, Protocol.PORT), 5000)
@@ -125,6 +128,7 @@ class MirrorService : Service() {
                 o.write(Protocol.MAGIC.toByteArray())
                 o.flush()
                 out = o
+                Log.add("connected, magic sent")
                 main.post {
                     if (!running) return@post
                     // Anything the capture or encoder refuses is shown on the phone, not a crash.
@@ -144,13 +148,20 @@ class MirrorService : Service() {
             return
         }
         projection = p
+        Log.add("projection obtained")
         p.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() { stopEverything(); stopSelf() }
+            override fun onStop() {
+                Log.add("projection.onStop(): the system or the user ended the capture")
+                if (running) _state.value = State.Failed("Android stopped the screen capture. Try again; if it repeats, choose \"Entire screen\" and keep Rokid Mirror open.")
+                stopEverything()
+                stopSelf()
+            }
         }, main)
         displayManager.registerDisplayListener(displayListener, main)
         val bounds = screenBounds()
         val (w, h) = targetSize(bounds)
         size = w to h
+        Log.add("screen ${bounds.width()}x${bounds.height()} -> stream ${w}x$h")
         val enc = newEncoder(w, h)
         encoder = enc
         inputSurface = enc.createInputSurface()
@@ -159,6 +170,7 @@ class MirrorService : Service() {
             "RokidMirror", w, h, resources.displayMetrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, inputSurface, null, main,
         )
+        Log.add("virtual display created")
         sendHeader(w, h)
         startDrain(enc)
         _state.value = State.Streaming(host, w, h)
@@ -172,6 +184,7 @@ class MirrorService : Service() {
             if (displayId != Display.DEFAULT_DISPLAY || !running) return
             val (w, h) = targetSize(screenBounds())
             if (w to h == size) return
+            Log.add("display changed -> ${w}x$h")
             main.postDelayed({
                 if (running && (w to h) != size) {
                     try { restartEncoder(w, h) } catch (e: Exception) { fail("Re-fit failed: ${e.message}") }
@@ -247,6 +260,7 @@ class MirrorService : Service() {
     private fun startDrain(enc: MediaCodec) {
         val t = Thread({
             val info = MediaCodec.BufferInfo()
+            var frames = 0
             while (running && encoder === enc) {
                 val index = try { enc.dequeueOutputBuffer(info, 20_000) } catch (e: Exception) { break }
                 if (index < 0) continue
@@ -255,11 +269,15 @@ class MirrorService : Service() {
                 enc.releaseOutputBuffer(index, false)
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
                     config = bytes
+                    Log.add("codec config ${bytes.size} B sent")
                     if (!send(Protocol.KIND_CONFIG, bytes, 0)) break
                 } else {
                     if (!send(Protocol.KIND_FRAME, bytes, info.presentationTimeUs)) break
+                    frames++
+                    if (frames == 1 || frames % 300 == 0) Log.add("frame $frames sent (${bytes.size} B)")
                 }
             }
+            Log.add("drain ended after $frames frames (running=$running)")
         }, "rokid-mirror-drain").apply { isDaemon = true }
         drain = t
         t.start()
@@ -272,11 +290,13 @@ class MirrorService : Service() {
     }
 
     private fun fail(message: String) {
+        Log.add("FAILED: $message")
         _state.value = State.Failed(message)
         main.post { stopEverything(); stopSelf() }
     }
 
     private fun stopEverything() {
+        if (running) Log.add("stopping")
         running = false
         runCatching { displayManager.unregisterDisplayListener(displayListener) }
         stopDrain()
@@ -294,6 +314,7 @@ class MirrorService : Service() {
         socket = null
         if (_state.value !is State.Failed) _state.value = State.Off
         stopForeground(STOP_FOREGROUND_REMOVE)
+        Log.save(this)
     }
 
     override fun onDestroy() {

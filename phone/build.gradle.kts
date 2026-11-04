@@ -11,8 +11,8 @@ val signingProps = Properties().apply {
     rootProject.file("signing.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
 }
 
-val appVersionName = "1.0.2"
-val appVersionCode = 3
+val appVersionName = "1.0.3"
+val appVersionCode = 4
 
 base {
     archivesName = "RokidMirror-phone-$appVersionName"

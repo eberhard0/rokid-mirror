@@ -124,7 +124,12 @@ private fun Screen(savedHost: String, rememberHost: (String) -> Unit) {
                 Button(onClick = ::begin, enabled = host.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Try again") }
             }
         }
-        Row { Spacer(Modifier.height(1.dp)) }
+        val log by Log.recent.collectAsStateWithLifecycle()
+        if (log.isNotEmpty()) {
+            Text("Log", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            log.forEach { Text(it, color = Color(0xFFB0B0B8), fontSize = 11.sp, lineHeight = 15.sp) }
+            Text("Saved to Download/RokidMirror when a run ends.", color = Color(0xFF8A8A92), fontSize = 11.sp)
+        }
         Text(
             "The picture is scaled to the glasses' 480×640 display and shown in green. Sound stays on the phone " +
                 "(or in the glasses as a Bluetooth headset). Folding or unfolding re-fits the picture.",

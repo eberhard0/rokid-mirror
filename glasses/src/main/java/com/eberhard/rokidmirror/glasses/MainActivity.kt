@@ -74,11 +74,16 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    /** Why the previous connection ended, kept on the waiting screen so it can be read. */
+    @Volatile private var lastEnd: String? = null
+    private fun now() = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+
     private fun showWaiting(detail: String? = null) = main.post {
         status.visibility = View.VISIBLE
         line1.text = "Waiting for the phone…"
         line2.text = detail ?: "Open Rokid Mirror on the phone.\n" + (localIps().takeIf { it.isNotEmpty() }
-            ?.joinToString("\n") { (name, ip) -> "$name: $ip" } ?: "Not on Wi-Fi: join the phone's hotspot in Hi Rokid.")
+            ?.joinToString("\n") { (name, ip) -> "$name: $ip" } ?: "Not on Wi-Fi: join the phone's hotspot in Hi Rokid.") +
+            (lastEnd?.let { "\n\n$it" } ?: "")
     }
 
     private fun showConnected(from: String) = main.post {
@@ -120,11 +125,14 @@ class MainActivity : Activity() {
                 // One phone at a time: a new connection replaces the old one.
                 client?.let { runCatching { it.close() } }
                 client = socket
-                runCatching { serve(socket) }
-                    .onFailure { if (it !is EOFException) showWaiting("Lost the phone: ${it.message}") else showWaiting() }
+                val why = runCatching { serve(socket) }.exceptionOrNull()
                 runCatching { socket.close() }
                 decoder?.close()
                 decoder = null
+                lastEnd = when (why) {
+                    null, is EOFException -> "Phone closed the connection at ${now()}"
+                    else -> "Lost the phone at ${now()}: ${why.javaClass.simpleName} ${why.message}"
+                }
                 showWaiting()
             }
         }, "rokid-screen-server").apply { isDaemon = true; start() }
@@ -162,6 +170,7 @@ class MainActivity : Activity() {
                     decoder?.close()
                     while (!surfaceReady) Thread.sleep(50)
                     fitSurface(w, h)
+                    main.post { line2.text = "Stream ${w}x$h, waiting for the first picture…" }
                     decoder = Decoder(w, h, video.holder.surface) { if (first) { first = false; hideStatus() } }
                 }
                 Protocol.KIND_CONFIG -> decoder?.feed(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
