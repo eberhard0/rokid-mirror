@@ -10,4 +10,9 @@ object Protocol {
     const val KIND_HEADER = 1
     const val KIND_CONFIG = 2
     const val KIND_FRAME = 3
+    /** No payload: sent every 2 s when nothing else is, so a dead link is noticed within 6 s. */
+    const val KIND_PING = 4
+    /** No payload: the phone is stopping; the glasses go back to waiting at once. */
+    const val KIND_BYE = 5
+    const val SILENCE_TIMEOUT_MS = 6000
 }

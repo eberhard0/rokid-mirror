@@ -8,8 +8,8 @@ val signingProps = Properties().apply {
     rootProject.file("signing.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
 }
 
-val appVersionName = "1.0.4"
-val appVersionCode = 5
+val appVersionName = "1.0.5"
+val appVersionCode = 6
 
 base {
     archivesName = "RokidScreen-glasses-$appVersionName"

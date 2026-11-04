@@ -79,6 +79,8 @@ class MainActivity : Activity() {
     private fun now() = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
 
     private fun showWaiting(detail: String? = null) = main.post {
+        // Hiding the SurfaceView drops the last frame, so the waiting text sits on black.
+        video.visibility = View.INVISIBLE
         status.visibility = View.VISIBLE
         line1.text = "Waiting for the phone…"
         line2.text = detail ?: "Open Rokid Mirror on the phone.\n" + (localIps().takeIf { it.isNotEmpty() }
@@ -130,7 +132,8 @@ class MainActivity : Activity() {
                 decoder?.close()
                 decoder = null
                 lastEnd = when (why) {
-                    null, is EOFException -> "Phone closed the connection at ${now()}"
+                    null, is EOFException -> "Phone stopped at ${now()}"
+                    is java.net.SocketTimeoutException -> "Phone went silent at ${now()} (hotspot off, or Rokid Mirror closed)"
                     else -> "Lost the phone at ${now()}: ${why.javaClass.simpleName} ${why.message}"
                 }
                 showWaiting()
@@ -152,6 +155,8 @@ class MainActivity : Activity() {
 
     private fun serve(socket: Socket) {
         socket.tcpNoDelay = true
+        // A phone that vanished (hotspot off, app killed) never sends a FIN over Wi-Fi; give up on silence.
+        socket.soTimeout = Protocol.SILENCE_TIMEOUT_MS
         val input = DataInputStream(socket.getInputStream().buffered(256 * 1024))
         val magic = ByteArray(4).also { input.readFully(it) }
         if (String(magic) != Protocol.MAGIC) throw IllegalStateException("Not a Rokid Mirror stream")
@@ -163,12 +168,17 @@ class MainActivity : Activity() {
             val pts = input.readLong()
             val payload = ByteArray(length).also { input.readFully(it) }
             when (kind) {
+                Protocol.KIND_PING -> {}
+                Protocol.KIND_BYE -> return
                 Protocol.KIND_HEADER -> {
                     val b = ByteBuffer.wrap(payload)
                     val w = b.int
                     val h = b.int
                     decoder?.close()
-                    while (!surfaceReady) Thread.sleep(50)
+                    main.post { video.visibility = View.VISIBLE }
+                    var waited = 0
+                    while (!surfaceReady && waited < 100) { Thread.sleep(50); waited++ }
+                    if (!surfaceReady) throw IllegalStateException("No drawing surface")
                     fitSurface(w, h)
                     main.post { line2.text = "Stream ${w}x$h, waiting for the first picture…" }
                     decoder = Decoder(w, h, video.holder.surface) { if (first) { first = false; hideStatus() } }

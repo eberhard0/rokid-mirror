@@ -257,7 +257,8 @@ class MirrorService : Service() {
         if (sender != null) return
         val t = Thread({
             while (running) {
-                val p = try { outbox.take() } catch (e: InterruptedException) { break }
+                val p = try { outbox.poll(2, java.util.concurrent.TimeUnit.SECONDS) } catch (e: InterruptedException) { break }
+                    ?: Packet(Protocol.KIND_PING, ByteArray(0), 0)
                 val o = out ?: break
                 try {
                     o.writeInt(p.kind)
@@ -325,8 +326,26 @@ class MirrorService : Service() {
         main.post { stopEverything(); stopSelf() }
     }
 
+    /** Tells the glasses we're leaving, so they show "waiting" at once instead of a stale picture. */
+    private fun sayBye() {
+        val o = out ?: return
+        val t = sender
+        running = false
+        t?.interrupt()
+        runCatching { t?.join(300) }
+        runCatching {
+            synchronized(o) {
+                o.writeInt(Protocol.KIND_BYE); o.writeInt(0); o.writeLong(0); o.flush()
+            }
+            socket?.shutdownOutput()
+        }
+    }
+
     private fun stopEverything() {
-        if (running) Log.add("stopping")
+        if (running) {
+            Log.add("stopping")
+            Thread({ sayBye() }, "rokid-mirror-bye").apply { start(); runCatching { join(600) } }
+        }
         running = false
         runCatching { displayManager.unregisterDisplayListener(displayListener) }
         stopDrain()
