@@ -64,15 +64,99 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         startServer()
+        startDexProber()
         advertise()
         showWaiting()
     }
 
     override fun onStop() {
         unadvertise()
+        stopDexProber()
         stopServer()
         super.onStop()
     }
+
+    // ---- DeX mode: the phone (the hotspot gateway) serves a scrcpy stream of a virtual display
+    // that Samsung DeX runs on; the glasses connect to it. Tried every few seconds while idle, so
+    // there is nothing to press here: whichever of Mirror or DeX the phone offers is shown.
+    @Volatile private var dexActive = false
+    private var dexThread: Thread? = null
+
+    private fun startDexProber() {
+        if (dexThread != null) return
+        val t = Thread({
+            while (!Thread.currentThread().isInterrupted) {
+                try { Thread.sleep(3000) } catch (e: InterruptedException) { break }
+                if (client != null && !client!!.isClosed) continue // mirroring is on
+                val gateway = gatewayIp() ?: continue
+                val socket = try {
+                    Socket().apply { connect(java.net.InetSocketAddress(gateway, Protocol.DEX_PORT), 1500) }
+                } catch (e: Exception) { continue }
+                dexActive = true
+                main.post { line1.text = "DeX"; line2.text = "Connected to the phone's DeX screen, waiting for the picture…" }
+                val why = runCatching { serveDex(socket) }.exceptionOrNull()
+                runCatching { socket.close() }
+                decoder?.close()
+                decoder = null
+                dexActive = false
+                lastEnd = "DeX ended at ${now()}" + (why?.let { if (it is EOFException) "" else ": ${it.javaClass.simpleName} ${it.message}" } ?: "")
+                showWaiting()
+            }
+        }, "rokid-screen-dex").apply { isDaemon = true }
+        dexThread = t
+        t.start()
+    }
+
+    private fun stopDexProber() {
+        dexThread?.interrupt()
+        dexThread = null
+    }
+
+    /**
+     * scrcpy's video socket (server 5.x, send_device_meta=false, send_dummy_byte=false,
+     * send_stream_meta=true, send_frame_meta=true): 4-byte codec id, then 12-byte headers.
+     * A header whose first int has the top bit set is a session packet (flags, width, height);
+     * otherwise it is a frame header (int64 pts+flags, int32 size) followed by the packet.
+     */
+    private fun serveDex(socket: Socket) {
+        socket.tcpNoDelay = true
+        socket.soTimeout = 15000
+        val input = DataInputStream(socket.getInputStream().buffered(256 * 1024))
+        input.readInt() // codec id (h264)
+        var first = true
+        while (!socket.isClosed) {
+            val a = input.readInt()
+            val b = input.readInt()
+            val c = input.readInt()
+            if (a and Int.MIN_VALUE != 0) {
+                // Session: a new display size (DeX started, or the display was resized).
+                val w = b
+                val h = c
+                decoder?.close()
+                main.post { video.visibility = View.VISIBLE }
+                var waited = 0
+                while (!surfaceReady && waited < 100) { Thread.sleep(50); waited++ }
+                if (!surfaceReady) throw IllegalStateException("No drawing surface")
+                fitSurface(w, h)
+                decoder = Decoder(w, h, video.holder.surface) { if (first) { first = false; hideStatus() } }
+                continue
+            }
+            val ptsAndFlags = (a.toLong() shl 32) or (b.toLong() and 0xffffffffL)
+            val size = c
+            val payload = ByteArray(size).also { input.readFully(it) }
+            val isConfig = ptsAndFlags and (1L shl 62) != 0L
+            val pts = ptsAndFlags and ((1L shl 61) - 1)
+            if (isConfig) decoder?.feed(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+            else decoder?.feed(payload, pts, 0)
+        }
+    }
+
+    /** The phone, when the glasses are on its hotspot: the default route's gateway. */
+    private fun gatewayIp(): String? = runCatching {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val lp = cm.getLinkProperties(cm.activeNetwork) ?: return null
+        lp.routes.firstOrNull { it.isDefaultRoute && it.gateway is java.net.Inet4Address }?.gateway?.hostAddress
+    }.getOrNull()
 
     /** Why the previous connection ended, kept on the waiting screen so it can be read. */
     @Volatile private var lastEnd: String? = null
@@ -124,6 +208,7 @@ class MainActivity : Activity() {
         serverThread = Thread({
             while (!s.isClosed) {
                 val socket = try { s.accept() } catch (e: Exception) { break }
+                if (dexActive) { runCatching { socket.close() }; continue }
                 // One phone at a time: a new connection replaces the old one.
                 client?.let { runCatching { it.close() } }
                 client = socket

@@ -16,3 +16,15 @@ Wire format: see `Protocol.kt` (identical in both modules). Folding/unfolding se
 header; the glasses rebuild the decoder.
 
 Build: GitHub Actions builds both signed release APKs on every push to `main`.
+
+## DeX mode (1.1.0)
+
+Since One UI 8, Samsung DeX starts on a virtual display created with ADB rights, so the glasses can
+be a DeX screen while the phone keeps its own. `tools/rokid-dex.sh` (kept at `~/bin/rokid-dex.sh` in
+Termux on the phone) runs scrcpy-server 5.0.1 through the phone's own Wireless debugging with
+`new_display=640x480/120` and relays its video socket on port 27184; Rokid Screen tries that port on
+the hotspot gateway every few seconds and shows the stream when it appears. Mirror and DeX are
+chosen on the phone (chips at the top of Rokid Mirror); the glasses show whichever is running. A
+Bluetooth mouse/keyboard paired to the phone drives DeX. The "Start DeX screen" button asks Termux to
+run the script (Termux needs `allow-external-apps = true` in `~/.termux/termux.properties`);
+otherwise run it in Termux by hand.

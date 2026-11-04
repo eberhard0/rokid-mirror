@@ -28,4 +28,6 @@ object Protocol {
     /** No payload: the phone is stopping; the glasses go back to waiting at once. */
     const val KIND_BYE = 5
     const val SILENCE_TIMEOUT_MS = 6000
+    /** DeX mode: the phone relays scrcpy's video socket here (see ~/bin/rokid-dex.sh). */
+    const val DEX_PORT = 27184
 }

@@ -61,6 +61,7 @@ private fun Screen(savedHost: String, rememberHost: (String) -> Unit) {
     val discovery = remember { Discovery(context) }
     val found by discovery.found.collectAsStateWithLifecycle()
     var host by rememberSaveable { mutableStateOf(savedHost) }
+    var dexMode by rememberSaveable { mutableStateOf(false) }
     DisposableEffect(Unit) {
         discovery.start()
         onDispose { discovery.stop() }
@@ -88,6 +89,14 @@ private fun Screen(savedHost: String, rememberHost: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Rokid Mirror", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ModeChip("Mirror", !dexMode) { dexMode = false }
+            ModeChip("DeX", dexMode) { dexMode = true }
+        }
+        if (dexMode) {
+            DexPanel(context)
+            return@Column
+        }
         Text(
             "Shows this phone's screen in the Rokid glasses. Open Rokid Screen on the glasses first; " +
                 "both must be on the same Wi-Fi or on this phone's hotspot.",
@@ -136,4 +145,55 @@ private fun Screen(savedHost: String, rememberHost: (String) -> Unit) {
             color = Color(0xFF8A8A92), fontSize = 12.sp, lineHeight = 17.sp,
         )
     }
+}
+
+
+@Composable
+private fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    if (selected) Button(onClick = onClick) { Text(label) } else OutlinedButton(onClick = onClick) { Text(label) }
+}
+
+/**
+ * DeX mode: a second, virtual screen on this phone that Samsung DeX runs on (One UI 8+),
+ * streamed to the glasses. The screen is made by scrcpy-server through the phone's own ADB,
+ * driven from Termux by ~/bin/rokid-dex.sh; this panel only asks Termux to run it.
+ */
+@Composable
+private fun DexPanel(context: Context) {
+    var note by remember { mutableStateOf("") }
+    val askRun = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        note = if (ok) "Termux may now run the DeX script. Tap Start DeX again." else "Without that permission, run the command in Termux yourself."
+    }
+    fun termux(action: String) {
+        val perm = "com.termux.permission.RUN_COMMAND"
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, perm) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askRun.launch(perm)
+            return
+        }
+        val i = android.content.Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/home/bin/rokid-dex.sh")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf(action))
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+        }
+        note = runCatching { context.startForegroundService(i); "Asked Termux to run: rokid-dex.sh $action" }
+            .getOrElse { "Termux refused: ${it.message}. Run it in Termux: rokid-dex.sh $action" }
+    }
+    Text(
+        "A second screen for Samsung DeX, shown in the glasses while this phone keeps its own screen. " +
+            "A Bluetooth mouse and keyboard paired to the phone drive it.",
+        color = Color(0xFFB0B0B8), fontSize = 14.sp, lineHeight = 20.sp,
+    )
+    Text(
+        "Needs: the glasses on this phone's hotspot with Rokid Screen open, Developer options → Wireless " +
+            "debugging on, and Termux paired to it once (rokid-dex.sh pair / connect).",
+        color = Color(0xFF8A8A92), fontSize = 12.sp, lineHeight = 17.sp,
+    )
+    Button(onClick = { termux("start") }, modifier = Modifier.fillMaxWidth()) { Text("Start DeX screen") }
+    OutlinedButton(onClick = { termux("stop") }, modifier = Modifier.fillMaxWidth()) { Text("Stop DeX screen") }
+    if (note.isNotEmpty()) Text(note, color = Color(0xFFB0B0B8), fontSize = 13.sp)
+    Text(
+        "Or in Termux:  ~/bin/rokid-dex.sh start   /   ~/bin/rokid-dex.sh stop",
+        color = Color(0xFF8A8A92), fontSize = 12.sp,
+    )
 }
