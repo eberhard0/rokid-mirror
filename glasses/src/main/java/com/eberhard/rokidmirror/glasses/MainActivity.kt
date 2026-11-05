@@ -42,6 +42,7 @@ class MainActivity : Activity() {
     private var nsd: NsdManager? = null
     private var registration: NsdManager.RegistrationListener? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -309,6 +310,10 @@ class MainActivity : Activity() {
     private fun advertise() {
         val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         multicastLock = wifi.createMulticastLock("rokid-screen").apply { setReferenceCounted(false); acquire() }
+        // Keep the glasses' Wi-Fi awake and responsive while we wait: a sleeping radio is a
+        // "No route to host" for the phone.
+        @Suppress("DEPRECATION")
+        wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "rokid-screen").apply { setReferenceCounted(false); acquire() }
         val manager = getSystemService(NSD_SERVICE) as NsdManager
         nsd = manager
         val info = NsdServiceInfo().apply {
@@ -331,6 +336,8 @@ class MainActivity : Activity() {
         registration = null
         runCatching { multicastLock?.release() }
         multicastLock = null
+        runCatching { wifiLock?.release() }
+        wifiLock = null
     }
 
     /** Every IPv4 address with its interface, Wi-Fi (wlan*) first: that's the one the phone needs. */

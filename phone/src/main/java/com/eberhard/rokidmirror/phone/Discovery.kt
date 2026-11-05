@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Finds "Rokid Screen" on the Wi-Fi (or the phone's own hotspot) by mDNS. */
 class Discovery(context: Context) {
-    data class Found(val name: String, val host: String, val port: Int)
+    data class Found(val name: String, val host: String, val port: Int, val seenAt: Long = System.currentTimeMillis())
 
     private val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -38,6 +38,9 @@ class Discovery(context: Context) {
                         runCatching {
                             socket.send(java.net.DatagramPacket(ask, ask.size, java.net.InetAddress.getByName("255.255.255.255"), Protocol.PROBE_PORT))
                         }
+                        // Glasses that stopped answering for 12 s are taken off the list: no stale entries.
+                        val cutoff = System.currentTimeMillis() - 12_000
+                        _found.value = _found.value.filter { it.seenAt > cutoff || it.name != "Rokid Screen" }
                         val until = System.currentTimeMillis() + 2000
                         while (System.currentTimeMillis() < until) {
                             val packet = java.net.DatagramPacket(buf, buf.size)
