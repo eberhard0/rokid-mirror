@@ -313,7 +313,9 @@ class MainActivity : Activity() {
         // Keep the glasses' Wi-Fi awake and responsive while we wait: a sleeping radio is a
         // "No route to host" for the phone.
         @Suppress("DEPRECATION")
-        wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "rokid-screen").apply { setReferenceCounted(false); acquire() }
+        wifiLock = runCatching {
+            wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "rokid-screen").apply { setReferenceCounted(false); acquire() }
+        }.getOrNull()
         val manager = getSystemService(NSD_SERVICE) as NsdManager
         nsd = manager
         val info = NsdServiceInfo().apply {
