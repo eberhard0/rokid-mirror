@@ -32,6 +32,8 @@ case "${1:-}" in
     adb push "$JAR" /data/local/tmp/scrcpy-server.jar >/dev/null
     adb forward tcp:$LOCAL localabstract:scrcpy >/dev/null
     # Loop: scrcpy-server exits when the glasses disconnect; start it again for the next time.
+    # The pid file must exist before the loop looks for it (it is the loop's stop signal).
+    : > $PIDS
     (
       while [ -f $PIDS ]; do
         adb shell CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server $VER \
@@ -41,7 +43,7 @@ case "${1:-}" in
         sleep 1
       done
     ) &
-    echo "$!" > $PIDS
+    echo "$!" >> $PIDS
     socat TCP-LISTEN:$RELAY,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:$LOCAL >> $LOG 2>&1 &
     echo "$!" >> $PIDS
     # Answers the glasses' "RMDEX?" broadcast so they find this phone on any shared Wi-Fi, not only the hotspot.
