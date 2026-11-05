@@ -24,10 +24,11 @@ server_loop() {
   # scrcpy-server exits when the glasses disconnect; start it again for the next time.
   local size=$1
   while [ -f "$PIDS" ]; do
+    echo "--- server start $(date +%T)" >> "$LOG"
     adb shell CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server $VER \
       tunnel_forward=true audio=false control=false video_codec=h264 max_size=640 video_bit_rate=2000000 max_fps=30 \
       new_display="$size" send_device_meta=false send_dummy_byte=false send_stream_meta=true send_frame_meta=true \
-      stay_awake=true cleanup=true log_level=info >> "$LOG" 2>&1
+      stay_awake=true cleanup=true log_level=verbose >> "$LOG" 2>&1
     sleep 1
   done
 }
