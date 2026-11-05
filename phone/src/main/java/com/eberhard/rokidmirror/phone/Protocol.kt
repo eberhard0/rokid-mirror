@@ -19,4 +19,6 @@ object Protocol {
     const val DEX_PORT = 27184
     /** UDP: the glasses broadcast "RMDEX?" here; the phone running rokid-dex.sh answers "RMDEX <port>". */
     const val DEX_DISCOVERY_PORT = 7072
+    /** Loopback control line of the on-phone helper "dexd": start / stop / status. */
+    const val DEXD_CONTROL_PORT = 27185
 }

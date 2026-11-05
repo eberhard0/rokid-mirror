@@ -12,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "rokid-mirror"
-include(":phone", ":glasses")
+include(":phone", ":glasses", ":dexd")

@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Never installed as an app: only its classes.dex is used, through app_process. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -17,7 +17,16 @@ header; the glasses rebuild the decoder.
 
 Build: GitHub Actions builds both signed release APKs on every push to `main`.
 
-## DeX mode (1.1.0)
+## DeX mode (1.2.0: works on any network)
+
+`dexd/` is a helper that lives on the phone with shell rights. `tools/rokid-dex.sh arm <port>` pushes it
+and scrcpy-server once per boot through Wireless debugging (the phone must be on Wi-Fi for that
+moment) and starts it detached; it then survives without ADB until the next reboot. It offers a
+loopback control line (127.0.0.1:27185: start/stop/status, used by Rokid Mirror's DeX buttons),
+bridges scrcpy-server's abstract socket to TCP 27184 for the glasses, and answers the glasses'
+"RMDEX?" broadcast. So DeX runs on the hotspot or any Wi-Fi.
+
+### Before 1.2.0 (1.1.0)
 
 Since One UI 8, Samsung DeX starts on a virtual display created with ADB rights, so the glasses can
 be a DeX screen while the phone keeps its own. `tools/rokid-dex.sh` (kept at `~/bin/rokid-dex.sh` in
